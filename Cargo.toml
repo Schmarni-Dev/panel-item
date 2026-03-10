@@ -28,7 +28,7 @@ directories = "6.0.0"
 [build-dependencies]
 syn = "2"
 prettyplease = "0.2"
-gluon-binder.git = "https://github.com/Technobaboo/gluon"
+gluon-parser.git = "https://github.com/Technobaboo/gluon"
 gluon-codegen-rust.git = "https://github.com/Technobaboo/gluon"
 # gluon-binder.path = "../gluon"
 # gluon-codegen-rust.path = "../gluon/gluon-codegen-rust"

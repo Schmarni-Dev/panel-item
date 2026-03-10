@@ -1,4 +1,4 @@
-use gluon_binder::idl_parser::parse_idl;
+use gluon_parser::parse_idl;
 use gluon_codegen_rust::gen_module;
 use std::env;
 use std::fs;
