@@ -1,10 +1,10 @@
 use std::{fmt::Debug, sync::Arc};
 
 use binderbinder::TransactionHandler;
-use gluon_wire::GluonDataReader;
+use gluon_wire::{GluonDataReader, drop_tracking::DropNotifier};
 use rustc_hash::FxHashMap;
 use stardust_xr_fusion::{ClientHandle, fields::FieldRef};
-use tokio::sync::watch;
+use tokio::sync::{RwLock, watch};
 
 use crate::protocol::{PanelItemAcceptor, PanelItemProviderHandler as _};
 
@@ -12,6 +12,7 @@ pub struct PanelItemProviderHandler {
     client: Arc<ClientHandle>,
     watch: watch::Receiver<FxHashMap<u64, (FieldRef, PanelItemAcceptor)>>,
     tx: watch::Sender<FxHashMap<u64, (FieldRef, PanelItemAcceptor)>>,
+    drop_notifs: RwLock<Vec<DropNotifier>>,
 }
 
 impl Debug for PanelItemProviderHandler {
@@ -25,7 +26,12 @@ impl Debug for PanelItemProviderHandler {
 impl PanelItemProviderHandler {
     pub fn new(client: Arc<ClientHandle>) -> Self {
         let (tx, watch) = watch::channel(FxHashMap::default());
-        Self { client, watch, tx }
+        Self {
+            client,
+            watch,
+            tx,
+            drop_notifs: RwLock::default(),
+        }
     }
     pub fn acceptors(&self) -> watch::Ref<'_, FxHashMap<u64, (FieldRef, PanelItemAcceptor)>> {
         self.watch.borrow()
@@ -54,6 +60,10 @@ impl crate::protocol::PanelItemProviderHandler for PanelItemProviderHandler {
                 v.remove(&field_id.id);
             });
         });
+    }
+
+    async fn drop_notification_requested(&self, notifier: gluon_wire::drop_tracking::DropNotifier) {
+        self.drop_notifs.write().await.push(notifier);
     }
 }
 impl TransactionHandler for PanelItemProviderHandler {

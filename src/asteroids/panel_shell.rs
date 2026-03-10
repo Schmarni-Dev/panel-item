@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use binderbinder::{TransactionHandler, binder_object::BinderObject};
 use derive_setters::Setters;
 use derive_where::derive_where;
-use gluon_wire::GluonDataReader;
+use gluon_wire::{GluonDataReader, drop_tracking::DropNotifier};
 use rand::random;
 use stardust_xr_asteroids::{CustomElement, FnWrapper, Transformable, ValidState};
 use stardust_xr_fusion::{
@@ -11,7 +11,7 @@ use stardust_xr_fusion::{
     node::{NodeError, NodeType},
     spatial::{Spatial, SpatialAspect, SpatialRef, Transform},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 
 use crate::protocol::{ChildState, Geometry, PanelItem, PanelShellHandler as _, SurfaceId};
 
@@ -168,6 +168,7 @@ pub struct PanelShellHandler {
     rx: Mutex<mpsc::UnboundedReceiver<PanelShellEvent>>,
     item_output_spatial: Spatial,
     item: PanelItem,
+    drop_notifs: RwLock<Vec<DropNotifier>>,
 }
 impl PanelShellHandler {
     pub fn new(item: PanelItem, item_output_spatial: Spatial) -> Self {
@@ -177,6 +178,7 @@ impl PanelShellHandler {
             rx: Mutex::new(rx),
             item_output_spatial,
             item,
+            drop_notifs: RwLock::default(),
         }
     }
     pub fn item(&self) -> &PanelItem {
@@ -291,6 +293,10 @@ impl crate::protocol::PanelShellHandler for PanelShellHandler {
         self.tx
             .send(PanelShellEvent::DestroyChild { child_id })
             .unwrap();
+    }
+
+    async fn drop_notification_requested(&self, notifier: gluon_wire::drop_tracking::DropNotifier) {
+        self.drop_notifs.write().await.push(notifier);
     }
 }
 impl TransactionHandler for PanelShellHandler {

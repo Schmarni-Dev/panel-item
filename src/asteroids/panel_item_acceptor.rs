@@ -9,7 +9,7 @@ use binderbinder::{
     binder_object::{BinderObject, ToBinderObjectOrRef},
 };
 use derive_setters::Setters;
-use gluon_wire::GluonDataReader;
+use gluon_wire::{GluonDataReader, drop_tracking::DropNotifier};
 use pion_binder::PionBinderDevice;
 use stardust_xr_asteroids::{CustomElement, FnWrapper, Transformable, ValidState};
 use stardust_xr_fusion::{
@@ -17,7 +17,7 @@ use stardust_xr_fusion::{
     node::NodeError,
     spatial::{Spatial, SpatialAspect, Transform},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 
 use crate::{
     asteroids::panel_shell::PanelShellHandler,
@@ -63,6 +63,7 @@ impl<State: ValidState> CustomElement<State> for PanelItemAcceptorElement<State>
             field_id: OnceLock::new(),
             tx,
             rx: Mutex::new(rx),
+            drop_notifs: RwLock::default(),
         });
         tokio::spawn({
             let dev = self.binder_dev.clone();
@@ -127,6 +128,7 @@ pub struct PanelItemAcceptorHandler {
     field_id: OnceLock<FieldRefId>,
     tx: mpsc::UnboundedSender<Arc<BinderObject<PanelShellHandler>>>,
     rx: Mutex<mpsc::UnboundedReceiver<Arc<BinderObject<PanelShellHandler>>>>,
+    drop_notifs: RwLock<Vec<DropNotifier>>,
 }
 impl crate::protocol::PanelItemAcceptorHandler for PanelItemAcceptorHandler {
     async fn accept(
@@ -154,6 +156,10 @@ impl crate::protocol::PanelItemAcceptorHandler for PanelItemAcceptorHandler {
             _ = self.field_id.set(id.clone());
             id
         }
+    }
+
+    async fn drop_notification_requested(&self, notifier: gluon_wire::drop_tracking::DropNotifier) {
+        self.drop_notifs.write().await.push(notifier);
     }
 }
 impl TransactionHandler for PanelItemAcceptorHandler {
