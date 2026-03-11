@@ -19,11 +19,8 @@ use crate::protocol::{ChildState, Geometry, PanelItem, PanelShellHandler as _, S
 #[derive(Setters)]
 #[setters(into, strip_option)]
 pub struct PanelShell<State: ValidState> {
-    #[setters(skip)]
     handler: Arc<BinderObject<PanelShellHandler>>,
-    #[setters(skip)]
     update_cursor_dmatex: FnWrapper<dyn Fn(&mut State, &PanelItem, DmatexSubmitInfo) + Send + Sync>,
-    #[setters(skip)]
     update_surface_dmatex:
         FnWrapper<dyn Fn(&mut State, &PanelItem, SurfaceId, DmatexSubmitInfo, bool) + Send + Sync>,
     on_toplevel_fullscreen_changed: FnWrapper<dyn Fn(&mut State, &PanelItem, bool) + Send + Sync>,
@@ -35,6 +32,30 @@ pub struct PanelShell<State: ValidState> {
     child_moved: FnWrapper<dyn Fn(&mut State, &PanelItem, u64, Geometry) + Send + Sync>,
     child_removed: FnWrapper<dyn Fn(&mut State, &PanelItem, u64) + Send + Sync>,
     transform: Transform,
+}
+impl<State: ValidState> PanelShell<State> {
+    pub fn new(
+        handler: &Arc<BinderObject<PanelShellHandler>>,
+        update_surface_dmatex: impl Fn(&mut State, &PanelItem, SurfaceId, DmatexSubmitInfo, bool)
+        + Send
+        + Sync
+        + 'static,
+        update_cursor_dmatex: impl Fn(&mut State, &PanelItem, DmatexSubmitInfo) + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            handler: handler.clone(),
+            update_cursor_dmatex: FnWrapper(Box::new(update_cursor_dmatex)),
+            update_surface_dmatex: FnWrapper(Box::new(update_surface_dmatex)),
+            on_toplevel_fullscreen_changed: FnWrapper(Box::new(|_, _, _| {})),
+            on_toplevel_title_changed: FnWrapper(Box::new(|_, _, _| {})),
+            on_toplevel_app_id_changed: FnWrapper(Box::new(|_, _, _| {})),
+            cursor_visuals_changed: FnWrapper(Box::new(|_, _, _| {})),
+            new_child: FnWrapper(Box::new(|_, _, _| {})),
+            child_moved: FnWrapper(Box::new(|_, _, _, _| {})),
+            child_removed: FnWrapper(Box::new(|_, _, _| {})),
+            transform: Transform::identity(),
+        }
+    }
 }
 
 impl<State: ValidState> CustomElement<State> for PanelShell<State> {
