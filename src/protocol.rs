@@ -1,6 +1,152 @@
 #![allow(unused)]
 use gluon_wire::GluonConvertable;
 #[derive(Debug, Clone)]
+pub struct PanelItemProvider {
+    obj: binderbinder::binder_object::BinderObjectOrRef,
+    drop_notification: std::sync::Arc<
+        binderbinder::binder_object::BinderObject<
+            gluon_wire::drop_tracking::DropNotifiedHandler,
+        >,
+    >,
+}
+impl gluon_wire::GluonConvertable for PanelItemProvider {
+    fn write<'a, 'b: 'a>(
+        &'b self,
+        data: &mut gluon_wire::GluonDataBuilder<'a>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.obj.write(data)
+    }
+    fn read(
+        data: &mut gluon_wire::GluonDataReader,
+    ) -> Result<Self, gluon_wire::GluonReadError> {
+        let obj = binderbinder::binder_object::BinderObjectOrRef::read(data)?;
+        Ok(PanelItemProvider::from_object_or_ref(obj))
+    }
+    fn write_owned(
+        self,
+        data: &mut gluon_wire::GluonDataBuilder<'_>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.obj.write_owned(data)
+    }
+}
+impl PanelItemProvider {
+    pub fn register_acceptor(&self, acceptor: PanelItemAcceptor) {
+        let mut builder = gluon_wire::GluonDataBuilder::new();
+        acceptor.write(&mut builder).unwrap();
+        self.obj
+            .device()
+            .transact_one_way(&self.obj, 8u32, builder.to_payload())
+            .unwrap();
+    }
+    pub fn drop_acceptor(&self, acceptor: PanelItemAcceptor) {
+        let mut builder = gluon_wire::GluonDataBuilder::new();
+        acceptor.write(&mut builder).unwrap();
+        self.obj
+            .device()
+            .transact_one_way(&self.obj, 9u32, builder.to_payload())
+            .unwrap();
+    }
+    pub fn from_handler<H: PanelItemProviderHandler>(
+        obj: &std::sync::Arc<binderbinder::binder_object::BinderObject<H>>,
+    ) -> PanelItemProvider {
+        PanelItemProvider::from_object_or_ref(
+            binderbinder::binder_object::ToBinderObjectOrRef::to_binder_object_or_ref(
+                obj,
+            ),
+        )
+    }
+    ///only use this when you know the binder ref implements this interface, else the consquences are for you to find out
+    pub fn from_object_or_ref(
+        obj: binderbinder::binder_object::BinderObjectOrRef,
+    ) -> PanelItemProvider {
+        let drop_notification = obj
+            .device()
+            .register_object(gluon_wire::drop_tracking::DropNotifiedHandler::new());
+        let mut builder = gluon_wire::GluonDataBuilder::new();
+        builder.write_binder(&drop_notification);
+        obj.device().transact_one_way(&obj, 4, builder.to_payload()).unwrap();
+        PanelItemProvider {
+            obj,
+            drop_notification,
+        }
+    }
+    pub fn death_or_drop(&self) -> impl Future<Output = ()> + Send + Sync + 'static {
+        let death_notification_future = match &self.obj {
+            binderbinder::binder_object::BinderObjectOrRef::Ref(r) => {
+                Some(r.death_notification())
+            }
+            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => {
+                Some(r.death_notification())
+            }
+            _ => None,
+        };
+        let drop_notification = self.drop_notification.clone();
+        async move {
+            if let Some(death) = death_notification_future {
+                tokio::select! {
+                    _ = death => {} _ = drop_notification.wait() => {}
+                }
+            } else {
+                drop_notification.wait().await;
+            }
+        }
+    }
+}
+impl binderbinder::binder_object::ToBinderObjectOrRef for PanelItemProvider {
+    fn to_binder_object_or_ref(&self) -> binderbinder::binder_object::BinderObjectOrRef {
+        self.obj.to_binder_object_or_ref()
+    }
+}
+pub trait PanelItemProviderHandler: binderbinder::device::TransactionHandler + Send + Sync + 'static {
+    fn register_acceptor(&self, acceptor: PanelItemAcceptor);
+    fn drop_acceptor(&self, acceptor: PanelItemAcceptor);
+    fn drop_notification_requested(
+        &self,
+        notifier: gluon_wire::drop_tracking::DropNotifier,
+    ) -> impl Future<Output = ()> + Send + Sync;
+    fn dispatch_two_way(
+        &self,
+        transaction_code: u32,
+        data: &mut gluon_wire::GluonDataReader,
+    ) -> impl Future<Output = gluon_wire::GluonDataBuilder<'static>> + Send + Sync {
+        async move {
+            let mut out = gluon_wire::GluonDataBuilder::new();
+            match transaction_code {
+                _ => {}
+            }
+            out
+        }
+    }
+    fn dispatch_one_way(
+        &self,
+        transaction_code: u32,
+        data: &mut gluon_wire::GluonDataReader,
+    ) -> impl Future<Output = ()> + Send + Sync {
+        async move {
+            match transaction_code {
+                4 => {
+                    let obj = data.read_binder().unwrap();
+                    self.drop_notification_requested(
+                            gluon_wire::drop_tracking::DropNotifier::new(&obj),
+                        )
+                        .await;
+                }
+                8u32 => {
+                    self.register_acceptor(
+                        gluon_wire::GluonConvertable::read(data).unwrap(),
+                    );
+                }
+                9u32 => {
+                    self.drop_acceptor(
+                        gluon_wire::GluonConvertable::read(data).unwrap(),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+}
+#[derive(Debug, Clone)]
 pub struct PanelShell {
     obj: binderbinder::binder_object::BinderObjectOrRef,
     drop_notification: std::sync::Arc<
@@ -145,21 +291,25 @@ impl PanelShell {
             drop_notification,
         }
     }
-    pub async fn death_or_drop(&self) {
-        let weak: Option<&binderbinder::binder_object::WeakBinderRef> = match &self.obj {
+    pub fn death_or_drop(&self) -> impl Future<Output = ()> + Send + Sync + 'static {
+        let death_notification_future = match &self.obj {
             binderbinder::binder_object::BinderObjectOrRef::Ref(r) => {
-                Some(std::ops::Deref::deref(r))
+                Some(r.death_notification())
             }
-            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => Some(r),
+            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => {
+                Some(r.death_notification())
+            }
             _ => None,
         };
-        if let Some(weak) = weak {
-            tokio::select! {
-                _ = weak.death_notification() => {} _ = self.drop_notification.wait() =>
-                {}
+        let drop_notification = self.drop_notification.clone();
+        async move {
+            if let Some(death) = death_notification_future {
+                tokio::select! {
+                    _ = death => {} _ = drop_notification.wait() => {}
+                }
+            } else {
+                drop_notification.wait().await;
             }
-        } else {
-            self.drop_notification.wait().await;
         }
     }
 }
@@ -497,21 +647,25 @@ impl PanelItem {
             drop_notification,
         }
     }
-    pub async fn death_or_drop(&self) {
-        let weak: Option<&binderbinder::binder_object::WeakBinderRef> = match &self.obj {
+    pub fn death_or_drop(&self) -> impl Future<Output = ()> + Send + Sync + 'static {
+        let death_notification_future = match &self.obj {
             binderbinder::binder_object::BinderObjectOrRef::Ref(r) => {
-                Some(std::ops::Deref::deref(r))
+                Some(r.death_notification())
             }
-            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => Some(r),
+            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => {
+                Some(r.death_notification())
+            }
             _ => None,
         };
-        if let Some(weak) = weak {
-            tokio::select! {
-                _ = weak.death_notification() => {} _ = self.drop_notification.wait() =>
-                {}
+        let drop_notification = self.drop_notification.clone();
+        async move {
+            if let Some(death) = death_notification_future {
+                tokio::select! {
+                    _ = death => {} _ = drop_notification.wait() => {}
+                }
+            } else {
+                drop_notification.wait().await;
             }
-        } else {
-            self.drop_notification.wait().await;
         }
     }
 }
@@ -794,21 +948,25 @@ impl PanelItemAcceptor {
             drop_notification,
         }
     }
-    pub async fn death_or_drop(&self) {
-        let weak: Option<&binderbinder::binder_object::WeakBinderRef> = match &self.obj {
+    pub fn death_or_drop(&self) -> impl Future<Output = ()> + Send + Sync + 'static {
+        let death_notification_future = match &self.obj {
             binderbinder::binder_object::BinderObjectOrRef::Ref(r) => {
-                Some(std::ops::Deref::deref(r))
+                Some(r.death_notification())
             }
-            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => Some(r),
+            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => {
+                Some(r.death_notification())
+            }
             _ => None,
         };
-        if let Some(weak) = weak {
-            tokio::select! {
-                _ = weak.death_notification() => {} _ = self.drop_notification.wait() =>
-                {}
+        let drop_notification = self.drop_notification.clone();
+        async move {
+            if let Some(death) = death_notification_future {
+                tokio::select! {
+                    _ = death => {} _ = drop_notification.wait() => {}
+                }
+            } else {
+                drop_notification.wait().await;
             }
-        } else {
-            self.drop_notification.wait().await;
         }
     }
 }
@@ -870,148 +1028,6 @@ pub trait PanelItemAcceptorHandler: binderbinder::device::TransactionHandler + S
         }
     }
 }
-#[derive(Debug, Clone)]
-pub struct PanelItemProvider {
-    obj: binderbinder::binder_object::BinderObjectOrRef,
-    drop_notification: std::sync::Arc<
-        binderbinder::binder_object::BinderObject<
-            gluon_wire::drop_tracking::DropNotifiedHandler,
-        >,
-    >,
-}
-impl gluon_wire::GluonConvertable for PanelItemProvider {
-    fn write<'a, 'b: 'a>(
-        &'b self,
-        data: &mut gluon_wire::GluonDataBuilder<'a>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.obj.write(data)
-    }
-    fn read(
-        data: &mut gluon_wire::GluonDataReader,
-    ) -> Result<Self, gluon_wire::GluonReadError> {
-        let obj = binderbinder::binder_object::BinderObjectOrRef::read(data)?;
-        Ok(PanelItemProvider::from_object_or_ref(obj))
-    }
-    fn write_owned(
-        self,
-        data: &mut gluon_wire::GluonDataBuilder<'_>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.obj.write_owned(data)
-    }
-}
-impl PanelItemProvider {
-    pub fn register_acceptor(&self, acceptor: PanelItemAcceptor) {
-        let mut builder = gluon_wire::GluonDataBuilder::new();
-        acceptor.write(&mut builder).unwrap();
-        self.obj
-            .device()
-            .transact_one_way(&self.obj, 8u32, builder.to_payload())
-            .unwrap();
-    }
-    pub fn drop_acceptor(&self, acceptor: PanelItemAcceptor) {
-        let mut builder = gluon_wire::GluonDataBuilder::new();
-        acceptor.write(&mut builder).unwrap();
-        self.obj
-            .device()
-            .transact_one_way(&self.obj, 9u32, builder.to_payload())
-            .unwrap();
-    }
-    pub fn from_handler<H: PanelItemProviderHandler>(
-        obj: &std::sync::Arc<binderbinder::binder_object::BinderObject<H>>,
-    ) -> PanelItemProvider {
-        PanelItemProvider::from_object_or_ref(
-            binderbinder::binder_object::ToBinderObjectOrRef::to_binder_object_or_ref(
-                obj,
-            ),
-        )
-    }
-    ///only use this when you know the binder ref implements this interface, else the consquences are for you to find out
-    pub fn from_object_or_ref(
-        obj: binderbinder::binder_object::BinderObjectOrRef,
-    ) -> PanelItemProvider {
-        let drop_notification = obj
-            .device()
-            .register_object(gluon_wire::drop_tracking::DropNotifiedHandler::new());
-        let mut builder = gluon_wire::GluonDataBuilder::new();
-        builder.write_binder(&drop_notification);
-        obj.device().transact_one_way(&obj, 4, builder.to_payload()).unwrap();
-        PanelItemProvider {
-            obj,
-            drop_notification,
-        }
-    }
-    pub async fn death_or_drop(&self) {
-        let weak: Option<&binderbinder::binder_object::WeakBinderRef> = match &self.obj {
-            binderbinder::binder_object::BinderObjectOrRef::Ref(r) => {
-                Some(std::ops::Deref::deref(r))
-            }
-            binderbinder::binder_object::BinderObjectOrRef::WeakRef(r) => Some(r),
-            _ => None,
-        };
-        if let Some(weak) = weak {
-            tokio::select! {
-                _ = weak.death_notification() => {} _ = self.drop_notification.wait() =>
-                {}
-            }
-        } else {
-            self.drop_notification.wait().await;
-        }
-    }
-}
-impl binderbinder::binder_object::ToBinderObjectOrRef for PanelItemProvider {
-    fn to_binder_object_or_ref(&self) -> binderbinder::binder_object::BinderObjectOrRef {
-        self.obj.to_binder_object_or_ref()
-    }
-}
-pub trait PanelItemProviderHandler: binderbinder::device::TransactionHandler + Send + Sync + 'static {
-    fn register_acceptor(&self, acceptor: PanelItemAcceptor);
-    fn drop_acceptor(&self, acceptor: PanelItemAcceptor);
-    fn drop_notification_requested(
-        &self,
-        notifier: gluon_wire::drop_tracking::DropNotifier,
-    ) -> impl Future<Output = ()> + Send + Sync;
-    fn dispatch_two_way(
-        &self,
-        transaction_code: u32,
-        data: &mut gluon_wire::GluonDataReader,
-    ) -> impl Future<Output = gluon_wire::GluonDataBuilder<'static>> + Send + Sync {
-        async move {
-            let mut out = gluon_wire::GluonDataBuilder::new();
-            match transaction_code {
-                _ => {}
-            }
-            out
-        }
-    }
-    fn dispatch_one_way(
-        &self,
-        transaction_code: u32,
-        data: &mut gluon_wire::GluonDataReader,
-    ) -> impl Future<Output = ()> + Send + Sync {
-        async move {
-            match transaction_code {
-                4 => {
-                    let obj = data.read_binder().unwrap();
-                    self.drop_notification_requested(
-                            gluon_wire::drop_tracking::DropNotifier::new(&obj),
-                        )
-                        .await;
-                }
-                8u32 => {
-                    self.register_acceptor(
-                        gluon_wire::GluonConvertable::read(data).unwrap(),
-                    );
-                }
-                9u32 => {
-                    self.drop_acceptor(
-                        gluon_wire::GluonConvertable::read(data).unwrap(),
-                    );
-                }
-                _ => {}
-            }
-        }
-    }
-}
 ///UVec2
 #[derive(Clone, Hash, Debug)]
 pub struct UVec2 {
@@ -1043,40 +1059,13 @@ impl gluon_wire::GluonConvertable for UVec2 {
         Ok(())
     }
 }
-///SpatialRef
+///Vec2
 #[derive(Clone, Debug)]
-pub struct SpatialRefId {
-    pub id: u64,
+pub struct Vec2 {
+    pub x: f32,
+    pub y: f32,
 }
-impl gluon_wire::GluonConvertable for SpatialRefId {
-    fn write<'a, 'b: 'a>(
-        &'b self,
-        data: &mut gluon_wire::GluonDataBuilder<'a>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.id.write(data)?;
-        Ok(())
-    }
-    fn read(
-        data: &mut gluon_wire::GluonDataReader,
-    ) -> Result<Self, gluon_wire::GluonReadError> {
-        let id = gluon_wire::GluonConvertable::read(data)?;
-        Ok(SpatialRefId { id })
-    }
-    fn write_owned(
-        self,
-        data: &mut gluon_wire::GluonDataBuilder<'_>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.id.write_owned(data)?;
-        Ok(())
-    }
-}
-///iVec2
-#[derive(Clone, Hash, Debug)]
-pub struct IVec2 {
-    pub x: i32,
-    pub y: i32,
-}
-impl gluon_wire::GluonConvertable for IVec2 {
+impl gluon_wire::GluonConvertable for Vec2 {
     fn write<'a, 'b: 'a>(
         &'b self,
         data: &mut gluon_wire::GluonDataBuilder<'a>,
@@ -1090,7 +1079,7 @@ impl gluon_wire::GluonConvertable for IVec2 {
     ) -> Result<Self, gluon_wire::GluonReadError> {
         let x = gluon_wire::GluonConvertable::read(data)?;
         let y = gluon_wire::GluonConvertable::read(data)?;
-        Ok(IVec2 { x, y })
+        Ok(Vec2 { x, y })
     }
     fn write_owned(
         self,
@@ -1098,87 +1087,6 @@ impl gluon_wire::GluonConvertable for IVec2 {
     ) -> Result<(), gluon_wire::GluonWriteError> {
         self.x.write_owned(data)?;
         self.y.write_owned(data)?;
-        Ok(())
-    }
-}
-///KeymapId
-#[derive(Clone, Hash, Debug)]
-pub struct KeymapId {
-    pub id: u64,
-}
-impl gluon_wire::GluonConvertable for KeymapId {
-    fn write<'a, 'b: 'a>(
-        &'b self,
-        data: &mut gluon_wire::GluonDataBuilder<'a>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.id.write(data)?;
-        Ok(())
-    }
-    fn read(
-        data: &mut gluon_wire::GluonDataReader,
-    ) -> Result<Self, gluon_wire::GluonReadError> {
-        let id = gluon_wire::GluonConvertable::read(data)?;
-        Ok(KeymapId { id })
-    }
-    fn write_owned(
-        self,
-        data: &mut gluon_wire::GluonDataBuilder<'_>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.id.write_owned(data)?;
-        Ok(())
-    }
-}
-///ToplevelState
-#[derive(Clone, Debug)]
-pub struct ToplevelState {
-    pub parent: Option<u64>,
-    pub title: Option<String>,
-    pub app_id: Option<String>,
-    pub size: UVec2,
-    pub min_size: Option<UVec2>,
-    pub max_size: Option<UVec2>,
-}
-impl gluon_wire::GluonConvertable for ToplevelState {
-    fn write<'a, 'b: 'a>(
-        &'b self,
-        data: &mut gluon_wire::GluonDataBuilder<'a>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.parent.write(data)?;
-        self.title.write(data)?;
-        self.app_id.write(data)?;
-        self.size.write(data)?;
-        self.min_size.write(data)?;
-        self.max_size.write(data)?;
-        Ok(())
-    }
-    fn read(
-        data: &mut gluon_wire::GluonDataReader,
-    ) -> Result<Self, gluon_wire::GluonReadError> {
-        let parent = gluon_wire::GluonConvertable::read(data)?;
-        let title = gluon_wire::GluonConvertable::read(data)?;
-        let app_id = gluon_wire::GluonConvertable::read(data)?;
-        let size = gluon_wire::GluonConvertable::read(data)?;
-        let min_size = gluon_wire::GluonConvertable::read(data)?;
-        let max_size = gluon_wire::GluonConvertable::read(data)?;
-        Ok(ToplevelState {
-            parent,
-            title,
-            app_id,
-            size,
-            min_size,
-            max_size,
-        })
-    }
-    fn write_owned(
-        self,
-        data: &mut gluon_wire::GluonDataBuilder<'_>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.parent.write_owned(data)?;
-        self.title.write_owned(data)?;
-        self.app_id.write_owned(data)?;
-        self.size.write_owned(data)?;
-        self.min_size.write_owned(data)?;
-        self.max_size.write_owned(data)?;
         Ok(())
     }
 }
@@ -1210,6 +1118,37 @@ impl gluon_wire::GluonConvertable for Geometry {
     ) -> Result<(), gluon_wire::GluonWriteError> {
         self.origin.write_owned(data)?;
         self.size.write_owned(data)?;
+        Ok(())
+    }
+}
+///iVec2
+#[derive(Clone, Hash, Debug)]
+pub struct IVec2 {
+    pub x: i32,
+    pub y: i32,
+}
+impl gluon_wire::GluonConvertable for IVec2 {
+    fn write<'a, 'b: 'a>(
+        &'b self,
+        data: &mut gluon_wire::GluonDataBuilder<'a>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.x.write(data)?;
+        self.y.write(data)?;
+        Ok(())
+    }
+    fn read(
+        data: &mut gluon_wire::GluonDataReader,
+    ) -> Result<Self, gluon_wire::GluonReadError> {
+        let x = gluon_wire::GluonConvertable::read(data)?;
+        let y = gluon_wire::GluonConvertable::read(data)?;
+        Ok(IVec2 { x, y })
+    }
+    fn write_owned(
+        self,
+        data: &mut gluon_wire::GluonDataBuilder<'_>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.x.write_owned(data)?;
+        self.y.write_owned(data)?;
         Ok(())
     }
 }
@@ -1289,34 +1228,142 @@ impl gluon_wire::GluonConvertable for ChildState {
         Ok(())
     }
 }
-///Vec2
-#[derive(Clone, Debug)]
-pub struct Vec2 {
-    pub x: f32,
-    pub y: f32,
+///KeymapId
+#[derive(Clone, Hash, Debug)]
+pub struct KeymapId {
+    pub id: u64,
 }
-impl gluon_wire::GluonConvertable for Vec2 {
+impl gluon_wire::GluonConvertable for KeymapId {
     fn write<'a, 'b: 'a>(
         &'b self,
         data: &mut gluon_wire::GluonDataBuilder<'a>,
     ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.x.write(data)?;
-        self.y.write(data)?;
+        self.id.write(data)?;
         Ok(())
     }
     fn read(
         data: &mut gluon_wire::GluonDataReader,
     ) -> Result<Self, gluon_wire::GluonReadError> {
-        let x = gluon_wire::GluonConvertable::read(data)?;
-        let y = gluon_wire::GluonConvertable::read(data)?;
-        Ok(Vec2 { x, y })
+        let id = gluon_wire::GluonConvertable::read(data)?;
+        Ok(KeymapId { id })
     }
     fn write_owned(
         self,
         data: &mut gluon_wire::GluonDataBuilder<'_>,
     ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.x.write_owned(data)?;
-        self.y.write_owned(data)?;
+        self.id.write_owned(data)?;
+        Ok(())
+    }
+}
+///SpatialRef
+#[derive(Clone, Debug)]
+pub struct SpatialRefId {
+    pub id: u64,
+}
+impl gluon_wire::GluonConvertable for SpatialRefId {
+    fn write<'a, 'b: 'a>(
+        &'b self,
+        data: &mut gluon_wire::GluonDataBuilder<'a>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.id.write(data)?;
+        Ok(())
+    }
+    fn read(
+        data: &mut gluon_wire::GluonDataReader,
+    ) -> Result<Self, gluon_wire::GluonReadError> {
+        let id = gluon_wire::GluonConvertable::read(data)?;
+        Ok(SpatialRefId { id })
+    }
+    fn write_owned(
+        self,
+        data: &mut gluon_wire::GluonDataBuilder<'_>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.id.write_owned(data)?;
+        Ok(())
+    }
+}
+///Rect
+#[derive(Clone, Debug)]
+pub struct Rect {
+    pub origin: Vec2,
+    pub size: Vec2,
+}
+impl gluon_wire::GluonConvertable for Rect {
+    fn write<'a, 'b: 'a>(
+        &'b self,
+        data: &mut gluon_wire::GluonDataBuilder<'a>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.origin.write(data)?;
+        self.size.write(data)?;
+        Ok(())
+    }
+    fn read(
+        data: &mut gluon_wire::GluonDataReader,
+    ) -> Result<Self, gluon_wire::GluonReadError> {
+        let origin = gluon_wire::GluonConvertable::read(data)?;
+        let size = gluon_wire::GluonConvertable::read(data)?;
+        Ok(Rect { origin, size })
+    }
+    fn write_owned(
+        self,
+        data: &mut gluon_wire::GluonDataBuilder<'_>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.origin.write_owned(data)?;
+        self.size.write_owned(data)?;
+        Ok(())
+    }
+}
+///ToplevelState
+#[derive(Clone, Debug)]
+pub struct ToplevelState {
+    pub parent: Option<u64>,
+    pub title: Option<String>,
+    pub app_id: Option<String>,
+    pub size: UVec2,
+    pub min_size: Option<UVec2>,
+    pub max_size: Option<UVec2>,
+}
+impl gluon_wire::GluonConvertable for ToplevelState {
+    fn write<'a, 'b: 'a>(
+        &'b self,
+        data: &mut gluon_wire::GluonDataBuilder<'a>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.parent.write(data)?;
+        self.title.write(data)?;
+        self.app_id.write(data)?;
+        self.size.write(data)?;
+        self.min_size.write(data)?;
+        self.max_size.write(data)?;
+        Ok(())
+    }
+    fn read(
+        data: &mut gluon_wire::GluonDataReader,
+    ) -> Result<Self, gluon_wire::GluonReadError> {
+        let parent = gluon_wire::GluonConvertable::read(data)?;
+        let title = gluon_wire::GluonConvertable::read(data)?;
+        let app_id = gluon_wire::GluonConvertable::read(data)?;
+        let size = gluon_wire::GluonConvertable::read(data)?;
+        let min_size = gluon_wire::GluonConvertable::read(data)?;
+        let max_size = gluon_wire::GluonConvertable::read(data)?;
+        Ok(ToplevelState {
+            parent,
+            title,
+            app_id,
+            size,
+            min_size,
+            max_size,
+        })
+    }
+    fn write_owned(
+        self,
+        data: &mut gluon_wire::GluonDataBuilder<'_>,
+    ) -> Result<(), gluon_wire::GluonWriteError> {
+        self.parent.write_owned(data)?;
+        self.title.write_owned(data)?;
+        self.app_id.write_owned(data)?;
+        self.size.write_owned(data)?;
+        self.min_size.write_owned(data)?;
+        self.max_size.write_owned(data)?;
         Ok(())
     }
 }
@@ -1356,37 +1403,6 @@ impl gluon_wire::GluonConvertable for PanelItemInitData {
         self.cursor.write_owned(data)?;
         self.toplevel.write_owned(data)?;
         self.children.write_owned(data)?;
-        Ok(())
-    }
-}
-///Rect
-#[derive(Clone, Debug)]
-pub struct Rect {
-    pub origin: Vec2,
-    pub size: Vec2,
-}
-impl gluon_wire::GluonConvertable for Rect {
-    fn write<'a, 'b: 'a>(
-        &'b self,
-        data: &mut gluon_wire::GluonDataBuilder<'a>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.origin.write(data)?;
-        self.size.write(data)?;
-        Ok(())
-    }
-    fn read(
-        data: &mut gluon_wire::GluonDataReader,
-    ) -> Result<Self, gluon_wire::GluonReadError> {
-        let origin = gluon_wire::GluonConvertable::read(data)?;
-        let size = gluon_wire::GluonConvertable::read(data)?;
-        Ok(Rect { origin, size })
-    }
-    fn write_owned(
-        self,
-        data: &mut gluon_wire::GluonDataBuilder<'_>,
-    ) -> Result<(), gluon_wire::GluonWriteError> {
-        self.origin.write_owned(data)?;
-        self.size.write_owned(data)?;
         Ok(())
     }
 }

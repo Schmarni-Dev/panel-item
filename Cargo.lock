@@ -248,7 +248,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "binderbinder"
 version = "0.1.0"
-source = "git+https://github.com/Technobaboo/binderbinder#efc82edd5bb2b57a3899dfdb4541750d1381d700"
+source = "git+https://github.com/Technobaboo/binderbinder#6844fa6f95841119bac65ef306fc1f2760483a07"
 dependencies = [
  "async-trait",
  "bitflags 2.11.0",
@@ -989,7 +989,7 @@ dependencies = [
 [[package]]
 name = "gluon-codegen-rust"
 version = "0.1.0"
-source = "git+https://github.com/Technobaboo/gluon#8b7be96213e3d649b2a87f0cc921ac3d2e8facad"
+source = "git+https://github.com/Technobaboo/gluon#185dd56ad72e2ccb362bd3ef966d3d015a811687"
 dependencies = [
  "convert_case 0.11.0",
  "gluon-parser",
@@ -1001,7 +1001,7 @@ dependencies = [
 [[package]]
 name = "gluon-parser"
 version = "0.1.0"
-source = "git+https://github.com/Technobaboo/gluon#8b7be96213e3d649b2a87f0cc921ac3d2e8facad"
+source = "git+https://github.com/Technobaboo/gluon#185dd56ad72e2ccb362bd3ef966d3d015a811687"
 dependencies = [
  "binderbinder",
  "chumsky",
@@ -1010,7 +1010,7 @@ dependencies = [
 [[package]]
 name = "gluon-wire"
 version = "0.1.0"
-source = "git+https://github.com/Technobaboo/gluon#8b7be96213e3d649b2a87f0cc921ac3d2e8facad"
+source = "git+https://github.com/Technobaboo/gluon#185dd56ad72e2ccb362bd3ef966d3d015a811687"
 dependencies = [
  "binderbinder",
  "thiserror 2.0.18",
