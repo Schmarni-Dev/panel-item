@@ -77,7 +77,7 @@ impl<State: ValidState> CustomElement<State> for PanelItemAcceptorElement<State>
                             .unwrap()
                             .runtime_dir()
                             .unwrap()
-                            .join(env::var("WAYLAND_DISPLAY").unwrap()),
+                            .join(format!("{}.lock", env::var("WAYLAND_DISPLAY").unwrap())),
                     )
                     .unwrap();
                 let binder_ref = dev.get_binder_ref_from_file(file).await.unwrap();
